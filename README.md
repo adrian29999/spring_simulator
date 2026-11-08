@@ -21,8 +21,8 @@ An interactive mass-spring-damper simulator with an optional PID controller, bui
 ## Installation
 
 ```bash
-git clone https://github.com/adrian29999/spring_sim.git
-cd spring_sim
+git clone https://github.com/adrian29999/spring_simulator.git
+cd spring_simulator
 python -m venv .venv
 source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
@@ -31,6 +31,6 @@ pip install -r requirements.txt
 ## Usage
 
 ```bash
-python3 spring_pid_simulation.py
+python3 spring_sim.py
 ```
 
