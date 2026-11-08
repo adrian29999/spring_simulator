@@ -25,7 +25,7 @@ git clone https://github.com/adrian29999/spring_simulator.git
 cd spring_simulator
 python -m venv .venv
 source .venv/bin/activate      # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 ```
 
 ## Usage
