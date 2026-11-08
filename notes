@@ -1,0 +1,276 @@
+'''
+--------------------------------------------------------------------------------
+------------------------------------NOTES---------------------------------------
+--------------------------------------------------------------------------------
+
+
+VARIABLES 
+
+m = mass (kg)
+k = stiffness (N/m)
+c = damping coefficient (N*s/m)
+zeta = damping ratio unitless
+wn = natural frequency (rad/s)
+discriminant = zeta**2 -1
+wd = natural damped frequency (rad/s)
+l1, l2 = eigenvalues, lambda1 and 2
+t = time (s)
+v0 = initial velocity (m/s)
+x0 = initial position, measured from the spring's rest length (m) 
+dt = RK4 time step (s)
+t_end = simulation length (s)
+state = [x, v] position and velocity (m, m/s)
+a = acceleration (m/s**2)
+F = force from the PID controller when PID is enabled (N)
+setpoint = PID target position (m)
+kp = proportional gain, acts as added stiffness to k (N/m) 
+ki = integral gain (N/m*s)
+kd = derivative gain, acts as added damping to c (N*s/m)
+integral_error = running sum of error*dt  (m*s)
+error = setpoint - x (m)
+A, B = state-space matrices
+tolerance = how close zeta must be to be treated as critically damped
+err_pct = second settling band, percent of total travel distance
+SETTLE_FRAC = fixed settling band, fraction of total travel distance
+k_eff, c_eff = effective stiffness / effective damping with the PID included
+z_fast = the fast zeta (fastest settling into the band 2 threshold)
+
+FORMULAS
+
+wn = sqrt(k/m)
+zeta = c / (2*sqrt(k*m))
+wd = wn*sqrt(1 - zeta**2)
+lambda = -zeta*wn ± wn*sqrt(zeta**2 - 1)
+critical damping: zeta = 1, c = 2*sqrt(k*m)
+Fast-zeta button: fast_zeta_formula(err_pct/100), or fast_zeta_scan if
+v0 != 0 or Ki > 0, or approximate when PID is on
+Equation of motion: m*x'' + c*x' + k*x = F
+PID force: F = kp*e + ki*integral(e) + kd*(-v)     
+
+PID in the characteristic equation (setpoint = 0, so e = -x):
+  m*s^3 + (c + kd)*s^2 + (k + kp)*s + ki = 0
+The third root (from Ki) is ignored for displayed zeta / wn / eigenvalues,
+leaving a 2nd-order system:
+  m*s^2 + c_eff*s + k_eff = 0
+  c_eff = c + kd
+  k_eff = k + kp
+The Crit and fast-zeta snap buttons use c_eff / k_eff, so they are only
+approximate when ki > 0 because the ignored root still affects the result.
+
+Snap buttons for Kp and Kd:
+  Kp target: k_eff = c_eff^2 / (4 z^2 m), Kp = k_eff - k
+  Kd target: c_eff = 2 z sqrt(k_eff m), Kd = c_eff - c
+
+zeta is a unitless damping ratio,
+0 is no damping,
+below 1 is underdamped,
+fastest is 1/root2 (0.707) with an overshoot of about 4.3% (e**-pi),
+1 is critically damped (fastest non-oscillatory return),
+more than 1 is overdamped, slower than 1.
+Fast zeta vs critical zeta: for the band 2 settling line (err_pct),
+the fast zeta settles EARLIER than critical zeta. For the fixed 0.1% line,
+the fast zeta settles LATER than critical zeta, because its overshoot
+is still above such a tight band. The fastest zeta depends on the error
+threshold, so the fast zeta snap button uses the band chosen with the
+'band 2' slider (err_pct).
+fastest zeta for other bands:
+The fast zeta rises toward 1 as the band tightens, as the error threshold
+gets closer to 0, and there is no room for an overshoot.
+
+Closed form (fast_zeta_formula), valid for v0 = 0 and Ki = 0:
+exp(-pi*z / sqrt(1-z^2)) = band, z = -ln(band) / sqrt(pi^2 + ln(band)^2)
+
+
+When the scan is used instead (fast_zeta_scan):
+The formula assumes v0 = 0 and no Ki root. If v0 != 0, or PID is ON with Ki > 0,
+the precision gets worse. With m, k_eff, Ki, x0, v0 as currently set, it tries
+zeta from 0.2 to 1 in steps of 0.005 (only the damping changes: c_eff =
+2*zeta*sqrt(k_eff*m)), computes the closed loop x(t) over the plot window
+t_end and keeps the zeta with the shortest settling time into the band of
+the second settling line. If there is no possible zeta that settles inside
+the window, it goes back to the formula method.
+
+A fast zeta button whose zeta came from the scan is KHAKI (red, out of range,
+takes priority).
+
+Limits of the scan:
+- It is evaluated at the CURRENT wn = sqrt(k_eff/m). That is exact for the c
+  and Kd buttons (they leave wn alone) but an approximation for m, k and Kp,
+  because snapping those changes wn, and with v0 != 0 or Ki > 0 the best zeta
+  depends on wn.
+- Assumes setpoint = 0. The scan always ignores Ki (2nd-order response).
+- Resolution 0.005 in zeta, and settling time can be jagged in a zeta below 1.
+- It is skipped (formula used) if x0 = 0 and v0 = 0, because nothing moves.
+- The scan uses the 2nd-order response (eigen-decomposition) with the Ki root
+  ignored, so with Ki > 0 it can differ from the RK4 simulation.
+
+
+  
+
+Why there are no snap buttons for Ki:
+  - Ki is the constant term of the cubic. It is the term dropped when the
+    third root is ignored, so Ki does not appear in zeta_eff =
+    c_eff / (2 sqrt(k_eff m)) and there is no formula to invert for it.
+  - Ki is not chosen for damping. Its job is to remove accumulated error /
+    reject a constant disturbance. The normal approach is to set Kp and Kd for
+    the damping and speed you want, then use the smallest Ki that gives enough
+    rejection. Since this system doesn't have any constant disturbances, it
+    would be rational to leave it out for simplicity.
+
+Choosing Kp and Kd together, optimally:
+  Crit / fast-zeta fix ONE equation (zeta), so with two free gains there is
+  more than one solution. Settling time is roughly f(zeta) / wn_eff, with
+  wn_eff = sqrt((k+Kp)/m), so after choosing zeta (e.g. fast zeta for the
+  band) a larger Kp gives a faster response, and Kd is then set by the Kd
+  target to hold that zeta. The true optimum in the code is therefore
+  limited only by the slider ranges, and is not modelled for reality (see
+  limitation 4).
+
+Closed-loop state-space (PID on), states [x, v], setpoint = 0, Ki root ignored:
+  A = [[0, 1],
+      [-(k+kp)/m, -(c+kd)/m]]
+  B(F_ext) = [0, 1/m]
+  The info panel shows this 2x2 matrix, and the eigenvalue panel uses the same
+  2nd-order approximation.
+
+Settling lines:
+  'Settling time (0.1%)' uses the fixed band SETTLE_FRAC.
+  'Settling time (err_pct%)' uses the slider (>= 0.5% > 0.1%), so it can never
+  be to the right of the first. A line whose time is beyond t_end is hidden and
+  reported as 'out of bounds'. The same happens if the run blows up (see
+  limitation 2).
+
+Validation:
+  the bottom row has three small graphs: the phase portrait, 'RK4 Error vs
+  Exact' and 'z Formula vs Scan'. Both error graphs use plain linear y axes
+  that are re-fitted to their own data.
+  Phase portrait: the x and v axes are refitted together and always have the
+  same span (+-the largest |x| or |v|, plus 5% padding), so the scales are equal.
+  RK4 Error vs Exact: RK4 position minus the exact analytic solution.
+  only available with PID off. With PID on there is no exact reference, so the
+  graph and the max|err| / MAE numbers show n/a.
+  z formula vs scan  : the formula's zeta minus the response with the scan's
+  zeta, everything else as set. The scan is run for the second
+  graph even when the fast zeta button does not need it.
+  
+LIMITATIONS / CLARIFICATIONS 
+
+1. Ki has nothing to do in the normal setup. The setpoint is 0 and the spring
+   rests at 0, so there is no error to remove. Integral action exists to fight
+   a constant disturbance (a constant force, like gravity) or a nonzero setpoint.
+   Here Ki can only slow or destabilize the PID response, and Kp is simply a
+   stiffer spring. With a setpoint and Ki = 0, the equilibrium is
+   kp*setpoint/(k+kp).
+   
+2. RK4 numerical stability: RK4 needs |lambda_max|*dt < ~2.8. With PID on, large
+   c_eff and small m give a fast pole near -(c+Kd)/m; e.g. m=1, c=15, Kd=20,
+   dt=0.1 blows up (~10**18), while dt <= 0.05 is fine.
+
+i.[Large Kd / Small m] -> System reacts too fast 
+            
+ii.[Wide Time Step (dt)] -> Solver calculates way past equilibrium
+        
+iii.[Wild Overcorrection] -> Next step pulls back harder into opposite direction
+        
+iv.[Exponential Feedback] -> Values amplify every step, rocket to ~10**18
+
+
+3. Slow Ki pole: the ignored third root is around -ki/k_eff.
+   The amplitude is very small, even a 0.1% band is enough to catch it,
+   so with Ki > 0 the settling time does not follow the displayed zeta and wn.
+   The "Ki root-ignoring error" block shows how far the displayed roots are from
+   the true theoretical cubic roots.
+   
+4. The PID is ideal: no actuator speed/force limitations, saturation, delay,
+   noise or anti-windup. Kd = 20 costs nothing, on real hardware active damping
+   needs a velocity sensor and actuator.
+   
+5. Gravity / orientation: x is measured from the spring's rest length and gravity
+   is not modelled. A vertical spring would have its rest position shifted by
+   m*g/k, but the horizontal spring in this simulation does not.
+   
+6. Degrees of freedom: the mass can only move along one axis (back and forth).
+   In the real world it could also move up, down, left or right, which is
+   ignored here.
+   
+7. Physical condition: only linear viscous friction is used, as opposed to
+   dry Coulomb friction. Things like spring mass, air drag, and sound generation
+   are treated as negligible
+
+8. The Ki term is NOT integrated by RK4. The state vector given to RK4 is only
+   [x, v], the integral of the error is not a third RK4 state. Instead
+   integral_error is held constant across the four RK4 stages of a step and
+   then updated afterwards with a rectangle rule (integral += e*dt, with e
+   taken at the start of the step). So:
+     - With Ki = 0 (or PID off) the simulation is fully 4th-order accurate.
+     - With Ki > 0 the Ki force is only first order accurate, so the whole
+       simulation becomes first order in dt, and its error shrinks only linearly
+       with dt.
+    The RK4 error graph cannot show this, because it is n/a whenever PID is on.
+
+ALL VARIABLES IN CODE
+
+Settings and parameters
+SETTLE_FRAC: fixed settling band (0.1% of travel)
+p: dict of all parameters (m, k, c, x0, v0, dt, err_pct, setpoint, kp, ki, kd, pid_on)
+t_end: current simulation length (s)
+T_END_LONG: long t_end preset (15 s)
+T_END_SHORT: short t_end preset (5 s)
+tolerance: how close zeta must be to 1 to count as critically damped in analytical_x
+ZETA_CRIT: critical damping ratio (1.0)
+_scan_cache: cache of fast_zeta_scan results
+
+Colours
+b_nthn: normal button colour
+b_hover: button hover colour
+b_na: button colour when the target is out of slider bounds
+b_scan: approx value
+
+Figure and plot objects
+fig: main figure
+ax_ts: position and velocity vs time axes
+line_v: velocity line
+line_x: position line
+line_settle: vertical line for the 0.1% settling time
+line_error_band: vertical line for the band 2 settling time
+oob_text: "out of bounds" message on the time plot
+LABEL_SETTLE: legend label for the 0.1% settling line
+ax_phase: phase portrait axes
+line_phase: phase portrait line
+ax_rk4_error: RK4 error graph axes
+line_rk4_error: RK4 error line
+rk4_na_text: "n/a (PID on)" label on the RK4 error graph
+ax_zeta_error: z Formula vs Scan axes
+line_zeta_error: formula-minus-scan difference line
+ax_info: invisible axes holding the info text
+info_a: left info text column
+info_b: right info text column 
+
+Sliders and buttons
+slider_specs: list of (key, min, max, start, label) for each slider
+sliders: dict of slider widgets by key
+y: running vertical position used for layout, reused for the checkbox row
+SNAP_KEYS: variables that get snap buttons (m, k, c, kp, kd)
+crit_snap_buttons: dict of crit buttons
+fast_snap_buttons: dict of fast zeta buttons
+ax_chk: axes for the PID checkbox
+chk: 'enable PID' checkbox
+ax_reset: axes for the reset button
+btn_reset: reset button
+ax_tend: axes for the t_end button
+btn_tend: t_end toggle button
+
+Uncategorised 
+slider_key, min_val, max_val, start, slider_label: current item while building sliders
+ax_s: axes of the last slider created
+snap_key: current key while building snap buttons
+pos: position box of the slider the buttons are placed next to
+ax_crit_snap, crit_btn: last crit button axes and button
+ax_fast_snap, fast_btn: last fast-zeta button axes and button
+slider_name: current key while connecting slider callbacks
+
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+
+'''
