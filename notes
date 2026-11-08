@@ -218,7 +218,6 @@ T_END_LONG: long t_end preset (15 s)
 T_END_SHORT: short t_end preset (5 s)
 tolerance: how close zeta must be to 1 to count as critically damped in analytical_x
 ZETA_CRIT: critical damping ratio (1.0)
-_scan_cache: cache of fast_zeta_scan results
 
 Colours
 b_nthn: normal button colour
